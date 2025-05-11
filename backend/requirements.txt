@@ -1,0 +1,10 @@
+flask
+flask-cors
+langchain
+openai
+pinecone-client
+python-dotenv
+pypdf
+python-docx
+pandas
+sqlite-utils

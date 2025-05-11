@@ -1,37 +1,54 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Check, ChevronsUpDown, FileText } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Badge } from "@/components/ui/badge"
-import type { FileSelectorProps } from "@/types/report"
+import { useState } from "react";
+import { Check, ChevronsUpDown, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import type { FileSelectorProps } from "@/types/report";
 
-export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: FileSelectorProps) {
-  const [open, setOpen] = useState(false)
+export function FileSelector({
+  selectedFiles,
+  onSelectFiles,
+  availableFiles,
+}: FileSelectorProps) {
+  const [open, setOpen] = useState(false);
 
   const handleSelectAuto = () => {
-    onSelectFiles(["auto"])
-    setOpen(false)
-  }
+    onSelectFiles(["auto"]);
+    setOpen(false);
+  };
 
   const handleSelectFile = (file: string) => {
     // If "auto" is already selected, remove it
     const newSelection = selectedFiles.includes("auto")
       ? [file]
       : selectedFiles.includes(file)
-        ? selectedFiles.filter((f) => f !== file)
-        : [...selectedFiles, file]
+      ? selectedFiles.filter((f) => f !== file)
+      : [...selectedFiles, file];
 
-    onSelectFiles(newSelection)
-  }
+    onSelectFiles(newSelection);
+  };
 
   const displayText = selectedFiles.includes("auto")
     ? "Auto-select files"
     : selectedFiles.length === 0
-      ? "Select files..."
-      : `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected`
+    ? "Select files..."
+    : `${selectedFiles.length} file${
+        selectedFiles.length > 1 ? "s" : ""
+      } selected`;
 
   return (
     <div className="space-y-2">
@@ -51,7 +68,12 @@ export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: F
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between"
+          >
             {displayText}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
@@ -64,11 +86,16 @@ export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: F
             </CommandList>
             <CommandList>
               <CommandGroup>
-                <CommandItem onSelect={handleSelectAuto} className="flex items-center">
+                <CommandItem
+                  onSelect={handleSelectAuto}
+                  className="flex items-center"
+                >
                   <div className="flex items-center gap-2 flex-1">
                     <span>Auto-select relevant files</span>
                   </div>
-                  {selectedFiles.includes("auto") && <Check className="h-4 w-4 ml-2" />}
+                  {selectedFiles.includes("auto") && (
+                    <Check className="h-4 w-4 ml-2" />
+                  )}
                 </CommandItem>
               </CommandGroup>
             </CommandList>
@@ -85,9 +112,10 @@ export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: F
                       <FileText className="h-4 w-4" />
                       <span>{file}</span>
                     </div>
-                    {selectedFiles.includes(file) && !selectedFiles.includes("auto") && (
-                      <Check className="h-4 w-4 ml-2" />
-                    )}
+                    {selectedFiles.includes(file) &&
+                      !selectedFiles.includes("auto") && (
+                        <Check className="h-4 w-4 ml-2" />
+                      )}
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -99,7 +127,11 @@ export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: F
       {selectedFiles.length > 0 && !selectedFiles.includes("auto") && (
         <div className="flex flex-wrap gap-2 mt-2">
           {selectedFiles.map((file) => (
-            <Badge key={file} variant="secondary" className="flex items-center gap-1">
+            <Badge
+              key={file}
+              variant="secondary"
+              className="flex items-center gap-1"
+            >
               <FileText className="h-3 w-3" />
               {file}
             </Badge>
@@ -107,5 +139,5 @@ export function FileSelector({ selectedFiles, onSelectFiles, availableFiles }: F
         </div>
       )}
     </div>
-  )
+  );
 }

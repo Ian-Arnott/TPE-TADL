@@ -1,39 +1,51 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState } from "react"
-import { Send } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { FileSelector } from "./file-selector"
-import type { ReportRequestFormProps } from "@/types/report"
+import { useEffect, useState } from "react";
+import { Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { FileSelector } from "./file-selector";
+import type { ReportRequestFormProps } from "@/types/report";
+import { set } from "date-fns";
+import { ApiService } from "@/lib/service";
 
-export function ReportRequestForm({ onSubmit, isSubmitting }: ReportRequestFormProps) {
-  const [prompt, setPrompt] = useState("")
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([])
+export function ReportRequestForm({
+  onSubmit,
+  isSubmitting,
+}: ReportRequestFormProps) {
+  const [prompt, setPrompt] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [availableFiles, setAvailableFiles] = useState<string[]>([]);
+  const apiService = new ApiService();
 
-  // This would typically come from an API
-  const availableFiles = [
-    "financial_report_2023.pdf",
-    "quarterly_results_q1.xlsx",
-    "market_analysis.docx",
-    "competitor_research.pdf",
-    "customer_feedback.csv",
-  ]
+  useEffect(() => {
+    const fetchFiles = async () => {
+      setAvailableFiles(await apiService.getAvailableFiles());
+    };
+    fetchFiles();
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (prompt.trim() && (selectedFiles.length > 0 || selectedFiles.includes("auto"))) {
-      onSubmit(prompt, selectedFiles)
-      setPrompt("")
-      setSelectedFiles([])
+    e.preventDefault();
+    if (
+      prompt.trim() &&
+      (selectedFiles.length > 0 || selectedFiles.includes("auto"))
+    ) {
+      onSubmit(prompt, selectedFiles);
+      setPrompt("");
+      setSelectedFiles([]);
     }
-  }
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FileSelector selectedFiles={selectedFiles} onSelectFiles={setSelectedFiles} availableFiles={availableFiles} />
+      <FileSelector
+        selectedFiles={selectedFiles}
+        onSelectFiles={setSelectedFiles}
+        availableFiles={availableFiles}
+      />
 
       <div className="flex items-end gap-2">
         <Textarea
@@ -46,7 +58,9 @@ export function ReportRequestForm({ onSubmit, isSubmitting }: ReportRequestFormP
         <Button
           type="submit"
           size="icon"
-          disabled={isSubmitting || !prompt.trim() || selectedFiles.length === 0}
+          disabled={
+            isSubmitting || !prompt.trim() || selectedFiles.length === 0
+          }
           className="h-10 w-10 shrink-0"
         >
           <Send className="h-4 w-4" />
@@ -54,5 +68,5 @@ export function ReportRequestForm({ onSubmit, isSubmitting }: ReportRequestFormP
         </Button>
       </div>
     </form>
-  )
+  );
 }

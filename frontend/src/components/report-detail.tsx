@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
-import { Download, AlertCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Skeleton } from "@/components/ui/skeleton"
-import type { ReportDetailProps } from "@/types/report"
+import { Download, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { ReportDetailProps } from "@/types/report";
 
 export function ReportDetail({ report, onDownload }: ReportDetailProps) {
   if (!report) {
@@ -13,7 +13,7 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
       <div className="flex h-full items-center justify-center">
         <p className="text-muted-foreground">Select a report to view details</p>
       </div>
-    )
+    );
   }
 
   return (
@@ -73,14 +73,19 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
             </div>
           ) : report.status === "complete" ? (
             <div className="prose max-w-none">
-              <p>This is a preview of the generated report. Download the full report to view all content.</p>
+              <p>
+                This is a preview of the generated report. Download the full
+                report to view all content.
+              </p>
               {/* This would typically contain a preview of the report content */}
             </div>
           ) : (
-            <p className="text-muted-foreground">Report generation failed. Please try again.</p>
+            <p className="text-muted-foreground">
+              Report generation failed. Please try again.
+            </p>
           )}
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

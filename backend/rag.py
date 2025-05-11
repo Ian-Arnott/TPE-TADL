@@ -5,32 +5,44 @@ import threading
 import sqlite3
 from datetime import datetime
 
-import pinecone
-import pandas as pd
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import RetrievalQA
-from langchain.vectorstores import Pinecone as LangchainPinecone
+# Pinecone client (unchanged – comes from the pinecone-client package)
+from pinecone import Pinecone, ServerlessSpec
 
+import pandas as pd
+
+# LangChain imports with correct namespaces
+from langchain_openai import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
+from langchain_community.vectorstores import Pinecone as LangchainPinecone
+
+# Document loaders and parsers
 from pypdf import PdfReader
 from docx import Document
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 load_dotenv()
 
 # --- Pinecone init ---
-pinecone.init(
-    api_key=os.getenv("PINECONE_API_KEY"),
-    environment=os.getenv("PINECONE_ENV")
+pc = Pinecone(
+    api_key=os.getenv("PINECONE_API_KEY")
 )
-INDEX_NAME = "briefing-index"
-if INDEX_NAME not in pinecone.list_indexes():
-    pinecone.create_index(INDEX_NAME, dimension=1536)
+INDEX_NAME = "briefing-index-2"
+if INDEX_NAME not in pc.list_indexes().names():  # Fixed: Changed to .names() method
+    pc.create_index(
+        name=INDEX_NAME,  # Fixed: Added 'name=' parameter
+        dimension=1536,
+        metric="cosine",
+        spec=ServerlessSpec(
+            cloud="aws",
+            region="us-east-1"
+        )
+    )
 
 # --- Embedding + LLM clients ---
 embeddings = OpenAIEmbeddings()
-llm = ChatOpenAI(model="gpt-4", temperature=0.3)
+llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.3)  # Fixed: Changed to gpt-4-turbo as gpt-4.1 doesn't exist
 
 # --- DB (SQLite) helpers ---
 DB_PATH = os.path.join(os.path.dirname(__file__), "reports.db")
@@ -65,6 +77,9 @@ def index_file(filepath: str):
     elif filepath.lower().endswith(".docx"):
         doc = Document(filepath)
         text = "\n".join(p.text for p in doc.paragraphs)
+    elif filepath.lower().endswith(".txt"):
+        with open(filepath, "r", encoding="utf-8") as f:
+            text = f.read()
     else:
         return
 
@@ -95,7 +110,8 @@ def generate_briefing(report_id: str):
         vectorstore = LangchainPinecone.from_existing_index(
             index_name=INDEX_NAME,
             embedding=embeddings
-        ).as_retriever(search_kwargs={"k": 10})
+        ).as_retriever(search_kwargs={"k": 10, "filter": {"source": {"$in": files}}})  # Fixed: Added filter by source
+        
         chain = RetrievalQA.from_chain_type(
             llm=llm,
             retriever=vectorstore,
@@ -112,8 +128,8 @@ Generate a briefing with sections:
 5) Tareas planificadas
 
 Prompt: {prompt}
-Limit retrieval to sources: {files}
-"""
+"""  # Fixed: Removed the misleading "Limit retrieval to sources" since we're using filter
+
         result = chain.run(meta).strip()
 
         # save out to disk
@@ -141,6 +157,13 @@ Limit retrieval to sources: {files}
 
 def create_report(title: str, prompt: str, files: list[str]) -> dict:
     """Insert new report record & launch background generation."""
+    # First make sure all files are indexed
+    UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+    for file in files:
+        filepath = os.path.join(UPLOAD_DIR, file)
+        if os.path.exists(filepath):
+            index_file(filepath)
+    
     report_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     cur = conn.cursor()

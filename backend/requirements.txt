@@ -1,8 +1,10 @@
 flask
 flask-cors
 langchain
+langchain-community
+langchain_openai
 openai
-pinecone-client
+pinecone
 python-dotenv
 pypdf
 python-docx

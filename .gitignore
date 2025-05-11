@@ -163,3 +163,5 @@ backend/*.db
 backend/generated_files
 backend/reports
 backend/uploads
+
+.vscode/

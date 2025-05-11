@@ -30,7 +30,7 @@ export default function ReportsPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchReports();
-    }, 10000);
+    }, 1000);
 
     fetchReports();
   }, []);
@@ -52,11 +52,11 @@ export default function ReportsPage() {
     const blob = await apiService.downloadReport(reportId);
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.style.display = "none";
     a.href = url;
     a.download = `report-${reportId}.pdf`;
     document.body.appendChild(a);
     a.click();
+    fetchReports();
   };
 
   return (

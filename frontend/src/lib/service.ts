@@ -52,7 +52,13 @@ export class ApiService {
   }
 
   async downloadReport(reportId: string): Promise<Blob> {
-    return new Blob();
+    try {
+      const response = await this.axiosInstance.get(`/reports/download/${reportId}`);
+      return new Blob([response.data], { type: "application/pdf" });
+    } catch (error) {
+      console.error("Error downloading report:", error);
+      throw error;
+    }
   }
 
   async uploadFile(files: File[]): Promise<void> {

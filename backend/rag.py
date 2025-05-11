@@ -1,53 +1,69 @@
 import os
+from typing import List
 import uuid
 import json
 import threading
 import sqlite3
 from datetime import datetime
-
-import pandas as pd
 from dotenv import load_dotenv
-load_dotenv()
+import re
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    ListItem,
+    ListFlowable,
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
-# Pinecone client
-from pinecone import Pinecone, ServerlessSpec
-
-# LangChain imports
-from langchain_openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import ChatOpenAI
-from langchain.chains import RetrievalQA
-from langchain_pinecone import PineconeVectorStore
-
-# Document loaders
+from openai import OpenAI
+from pinecone import Pinecone, ServerlessSpec, Vector
 from pypdf import PdfReader
 from docx import Document
+import logging
 
-# --- Pinecone init ---
-pc = Pinecone(
-    api_key=os.getenv("PINECONE_API_KEY")
-)
-INDEX_NAME = "briefing-index-2"
+load_dotenv()
+
+# ─── Configuration ─────────────────────────────────────────────────────────────
+
+openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+INDEX_NAME = "briefing-index-3"
+
+# ─── Embedding dimension ──────────────────────────────────────────────────────
+test_embedding = openai.embeddings.create(input="test", model="text-embedding-3-small")
+embedding_size = len(test_embedding.data[0].embedding)
+print(f"Embedding size: {embedding_size} printed")
+
+# ─── Pinecone init ────────────────────────────────────────────────────────────
+
+pc = Pinecone(api_key=PINECONE_API_KEY)
+
 if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(
         name=INDEX_NAME,
-        dimension=1536,
+        dimension=embedding_size,
         metric="cosine",
-        spec=ServerlessSpec(
-            cloud="aws",
-            region="us-east-1"
-        )
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
     )
 
-# --- Embedding + LLM clients ---
-embeddings = OpenAIEmbeddings()
-llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.3)
 
-# --- DB (SQLite) helpers ---
-DB_PATH = os.path.join(os.path.dirname(__file__), "reports.db")
+def get_index():
+    return pc.Index(INDEX_NAME)
+
+
+# ─── SQLite (for report tracking) ───────────────────────────────────────────────
+
+BASE_DIR = os.path.dirname(__file__)
+DB_PATH = os.path.join(BASE_DIR, "reports.db")
+
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-c = conn.cursor()
-c.execute("""
+cur = conn.cursor()
+cur.execute(
+    """
 CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY,
     title TEXT,
@@ -62,37 +78,151 @@ CREATE TABLE IF NOT EXISTS reports (
 )
 conn.commit()
 
+# ─── File utilities ────────────────────────────────────────────────────────────
+
+
 def list_available_files():
-    UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    return os.listdir(UPLOAD_DIR)
+    """Recursively walk through the uploads directory and return all files."""
+    upload_dir = os.path.join(BASE_DIR, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    files = []
+    for root, _, filenames in os.walk(upload_dir):
+        rel_path = os.path.relpath(root, upload_dir)
+        for filename in filenames:
+            if rel_path == ".":
+                files.append(filename)
+            else:
+                files.append(os.path.join(rel_path, filename))
+
+    return files
+
+
+# ─── Embedding & indexing ─────────────────────────────────────────────────────
+
+
+def embed_text(text: str) -> list[float]:
+    resp = openai.embeddings.create(input=text, model="text-embedding-3-small")
+    print(f"Embedding response: {resp.data[0].embedding[0]}")
+    return resp.data[0].embedding
 
 
 def index_file(filepath: str):
     """Parse PDF/DOCX/TXT, split & index into Pinecone."""
-    if filepath.lower().endswith(".pdf"):
-        reader = PdfReader(filepath)
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    elif filepath.lower().endswith(".docx"):
-        doc = Document(filepath)
-        text = "\n".join(p.text for p in doc.paragraphs)
-    elif filepath.lower().endswith(".txt"):
-        with open(filepath, "r", encoding="utf-8") as f:
-            text = f.read()
-    else:
-        return
+    try:
+        if filepath.lower().endswith(".pdf"):
+            reader = PdfReader(filepath)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        elif filepath.lower().endswith(".docx"):
+            doc = Document(filepath)
+            text = "\n".join(p.text for p in doc.paragraphs)
+        elif filepath.lower().endswith(".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                text = f.read()
+        else:
+            return
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_text(text)
-    metas = [{"source": os.path.basename(filepath)}] * len(chunks)
+        chunk_size = 500
+        overlap = 50
+        chunks: List[str] = []
+        for i in range(0, len(text), chunk_size - overlap):
+            chunks.append(text[i : i + chunk_size])
 
-    # Use updated PineconeVectorStore
-    vectorstore = PineconeVectorStore(
-        index_name=INDEX_NAME,
-        embedding=embeddings,
-        pinecone_api_key=os.getenv("PINECONE_API_KEY"),
+        index = get_index()
+        vectors: List[Vector] = []
+        for i, chunk in enumerate(chunks):
+            emb = embed_text(chunk)
+            id = f"{os.path.basename(filepath)}-{i}"
+            meta = {"source": os.path.basename(filepath), "text": chunk}
+            to_append = {"id": id, "values": emb, "metadata": meta}
+            vectors.append(to_append)
+
+        index.upsert(vectors=vectors)
+    except Exception as e:
+        print(f"Error indexing file {filepath}: {e}")
+
+
+# ─── Briefing generation ──────────────────────────────────────────────────────
+
+
+def export_to_pdf(text, output_path):
+    """Convert markdown-formatted text to a PDF file.
+
+    Supports:
+    - Headers (# H1, ## H2, ### H3)
+    - Bold (**text**)
+    - Italic (*text*)
+    - Lists (- item or * item)
+    """
+    doc = SimpleDocTemplate(output_path, pagesize=letter)
+    styles = getSampleStyleSheet()
+
+    if "Title" not in styles:
+        styles.add(
+            ParagraphStyle(name="Title", parent=styles["Heading1"], alignment=TA_CENTER)
+        )
+    if "Heading2" not in styles:
+        styles.add(ParagraphStyle(name="Heading2", parent=styles["Heading2"]))
+    if "Heading3" not in styles:
+        styles.add(ParagraphStyle(name="Heading3", parent=styles["Heading3"]))
+
+    normal_style = ParagraphStyle(
+        name="CustomNormal", parent=styles["Normal"], alignment=TA_JUSTIFY
     )
-    vectorstore.add_texts(texts=chunks, metadatas=metas)
+
+    content = []
+    bullets = []
+    in_list = False
+
+    for line in text.split("\n"):
+        if not line.strip():
+            if in_list and bullets:
+                content.append(ListFlowable(bullets, bulletType="bullet"))
+                bullets = []
+                in_list = False
+            content.append(Spacer(1, 6))
+            continue
+
+        if line.startswith("# "):
+            if in_list and bullets:
+                content.append(ListFlowable(bullets, bulletType="bullet"))
+                bullets = []
+                in_list = False
+            content.append(Paragraph(line[2:], styles["Title"]))
+        elif line.startswith("## "):
+            if in_list and bullets:
+                content.append(ListFlowable(bullets, bulletType="bullet"))
+                bullets = []
+                in_list = False
+            content.append(Paragraph(line[3:], styles["Heading2"]))
+        elif line.startswith("### "):
+            if in_list and bullets:
+                content.append(ListFlowable(bullets, bulletType="bullet"))
+                bullets = []
+                in_list = False
+            content.append(Paragraph(line[4:], styles["Heading3"]))
+        elif line.strip().startswith(("- ", "* ")):
+            in_list = True
+            text = line.strip()[2:]
+            text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+            text = re.sub(r"\*(.*?)\*", r"<i>\1</i>", text)
+            bullets.append(ListItem(Paragraph(text, normal_style)))
+        else:
+            if in_list and bullets:
+                content.append(ListFlowable(bullets, bulletType="bullet"))
+                bullets = []
+                in_list = False
+
+            text = line
+            text = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", text)
+            text = re.sub(r"\*(.*?)\*", r"<i>\1</i>", text)
+            content.append(Paragraph(text, normal_style))
+
+    if bullets:
+        content.append(ListFlowable(bullets, bulletType="bullet"))
+
+    doc.build(content)
+    return output_path
 
 
 def generate_briefing(report_id: str):
@@ -105,48 +235,76 @@ def generate_briefing(report_id: str):
     files = json.loads(files_json)
 
     try:
-        # Build retriever with metadata filter
-        retriever = PineconeVectorStore(
-            index_name=INDEX_NAME,
-            embedding=embeddings,
-            pinecone_api_key=os.getenv("PINECONE_API_KEY"),
-        ).as_retriever(search_kwargs={"k": 10, "filter": {"source": {"$in": files}}})
+        query_emb = embed_text(prompt)
 
-        chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=retriever,
-            chain_type="stuff"
+        index = get_index()
+        query_resp = index.query(
+            include_values=True,
+            include_metadata=True,
+            vector=query_emb,
+            top_k=10,
+            filter={"source": {"$in": files}},
         )
+        contexts = [match["metadata"]["text"] for match in query_resp["matches"]]
+        context = "\n\n".join(contexts) if contexts else ""
 
-        meta = f"""
-Generate a briefing with sections:
-1) Actividades recientes
-2) Problemas o bloqueos
-3) Interacciones con otros equipos
-4) KPIs
-5) Tareas planificadas
+        system_msg = {
+            "role": "system",
+            "content": "You are an assistant that generates concise team briefings in Spanish with markdown formatting.",
+        }
+        user_instructions = f"""
+            Genera un briefing con secciones usando markdown:
+            # Briefing del Equipo
+            
+            ## Actividades recientes
+            * Usa viñetas para listar actividades
+            * Destaca información importante en **negrita**
+            
+            ## Problemas o bloqueos
+            * Usa viñetas para listar problemas
+            * Usa *cursiva* para información contextual
+            
+            ## Interacciones con otros equipos
+            
+            ## KPIs
+            
+            ## Tareas planificadas
+            * Usa viñetas para listar tareas
 
+            ---
+            Si no hay información para una sección, escribe "No hay información disponible".
+            ---
 
----
-If there is no information for a section, please write "No hay información disponible".
----
+            Prompt: {prompt}
 
-Prompt: {prompt}
-"""
-        result = chain.run(meta).strip()
+            Contexto relevante extraído:
+            {context}
+        """.strip()
 
-        out_dir = os.path.join(os.path.dirname(__file__), "reports")
+        chat_resp = openai.responses.create(
+            model="gpt-4.1",
+            input=[system_msg, {"role": "user", "content": user_instructions}],
+            temperature=0.3,
+        )
+        result = chat_resp.output_text.strip()
+
+        out_dir = os.path.join(BASE_DIR, "reports")
         os.makedirs(out_dir, exist_ok=True)
-        outfile = os.path.join(out_dir, f"{report_id}.txt")
-        with open(outfile, "w", encoding="utf-8") as f:
+
+        txt_outfile = os.path.join(out_dir, f"{report_id}.txt")
+        with open(txt_outfile, "w", encoding="utf-8") as f:
             f.write(result)
+
+        pdf_outfile = os.path.join(out_dir, f"{report_id}.pdf")
+        export_to_pdf(result, pdf_outfile)
 
         cur.execute(
             """
             UPDATE reports
             SET status='complete', download_path=?
             WHERE id=?
-            """, (outfile, report_id)
+        """,
+            (pdf_outfile, report_id),
         )
         conn.commit()
 
@@ -156,61 +314,75 @@ Prompt: {prompt}
             UPDATE reports
             SET status='failed', error=?
             WHERE id=?
-            """, (str(e), report_id)
+        """,
+            (str(e), report_id),
         )
         conn.commit()
         print(f"Error generating report {report_id}: {e}")
 
 
+# ─── Report-management API ────────────────────────────────────────────────────
+
+
 def create_report(title: str, prompt: str, files: list[str]) -> dict:
-    UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-    for file in files:
-        filepath = os.path.join(UPLOAD_DIR, file)
-        if os.path.exists(filepath):
-            index_file(filepath)
+    try:
 
-    report_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO reports
-        (id, title, prompt, files, createdAt, status)
-        VALUES (?, ?, ?, ?, ?, 'generating')
-        """, (report_id, title, prompt, json.dumps(files), now)
-    )
-    conn.commit()
+        upload_dir = os.path.join(BASE_DIR, "uploads")
+        for filename in files:
+            path = os.path.join(upload_dir, filename)
+            if os.path.exists(path):
+                index_file(path)
 
-    thread = threading.Thread(target=generate_briefing, args=(report_id,))
-    thread.daemon = True
-    thread.start()
+        report_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO reports
+            (id, title, prompt, files, createdAt, status)
+            VALUES (?, ?, ?, ?, ?, 'generating')
+        """,
+            (report_id, title, prompt, json.dumps(files), now),
+        )
+        conn.commit()
 
-    return {
-        "id": report_id,
-        "title": title,
-        "prompt": prompt,
-        "files": files,
-        "createdAt": now,
-        "status": "generating"
-    }
+        thread = threading.Thread(target=generate_briefing, args=(report_id,))
+        thread.daemon = True
+        thread.start()
+
+        return {
+            "id": report_id,
+            "title": title,
+            "prompt": prompt,
+            "files": files,
+            "createdAt": now,
+            "status": "generating",
+        }
+    except Exception as e:
+        print(f"Error creating report: {e}")
+        return {"error": str(e)}
 
 
 def list_reports() -> list[dict]:
     cur = conn.cursor()
-    cur.execute("SELECT id, title, prompt, files, createdAt, status, download_path, error FROM reports")
+    cur.execute(
+        "SELECT id, title, prompt, files, createdAt, status, download_path, error FROM reports"
+    )
     rows = cur.fetchall()
     result = []
     for r in rows:
-        result.append({
-            "id": r[0],
-            "title": r[1],
-            "prompt": r[2],
-            "files": json.loads(r[3]),
-            "createdAt": r[4],
-            "status": r[5],
-            "downloadUrl": r[6] if r[6] else None,
-            "error": r[7] if r[7] else None
-        })
+        result.append(
+            {
+                "id": r[0],
+                "title": r[1],
+                "prompt": r[2],
+                "files": json.loads(r[3]),
+                "createdAt": r[4],
+                "status": r[5],
+                "downloadUrl": r[6] if r[6] else None,
+                "error": r[7] if r[7] else None,
+            }
+        )
     return result
 
 

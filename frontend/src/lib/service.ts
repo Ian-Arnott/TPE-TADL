@@ -27,13 +27,14 @@ export class ApiService {
     prompt: string,
     title: string,
     files: string[]
-  ): Promise<void> {
+  ): Promise<Report> {
     try {
-      await this.axiosInstance.post("/reports", {
+      const response = await this.axiosInstance.post("/reports/generate", {
         prompt,
         title,
         files,
       });
+      return response.data as Report;
     } catch (error) {
       console.error("Error creating report:", error);
       throw error;
@@ -52,5 +53,23 @@ export class ApiService {
 
   async downloadReport(reportId: string): Promise<Blob> {
     return new Blob();
+  }
+
+  async uploadFile(files: File[]): Promise<void> {
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        await this.axiosInstance.post("/files/upload", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      throw error;
+    }
   }
 }

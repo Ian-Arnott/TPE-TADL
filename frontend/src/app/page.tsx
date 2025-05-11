@@ -22,11 +22,15 @@ export default function ReportsPage() {
     (report) => report.id === selectedReportId
   );
 
+  const fetchReports = async () => {
+    const data = await apiService.getReports();
+    setReports(data);
+  };
+
   useEffect(() => {
-    const fetchReports = async () => {
-      const data = await apiService.getReports();
-      setReports(data);
-    };
+    const interval = setInterval(() => {
+      fetchReports();
+    }, 10000);
 
     fetchReports();
   }, []);
@@ -35,38 +39,8 @@ export default function ReportsPage() {
     setIsSubmitting(true);
 
     try {
-      // Simulate API call to backend
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      const newReport: Report = {
-        id: Date.now().toString(),
-        title:
-          prompt.split(".")[0].substring(0, 50) +
-          (prompt.length > 50 ? "..." : ""),
-        createdAt: new Date().toISOString(),
-        status: "generating",
-        prompt,
-        files,
-      };
-
-      setReports((prev) => [newReport, ...prev]);
-      setSelectedReportId(newReport.id);
-      setActiveTab("reports");
-
-      // Simulate report generation completion after some time
-      setTimeout(() => {
-        setReports((prev) =>
-          prev.map((report) =>
-            report.id === newReport.id
-              ? {
-                  ...report,
-                  status: "complete",
-                  downloadUrl: "#",
-                }
-              : report
-          )
-        );
-      }, 5000);
+      await apiService.createReport(prompt, "New Report", files);
+      fetchReports();
     } catch (error) {
       console.error("Error submitting report request:", error);
     } finally {

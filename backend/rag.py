@@ -5,33 +5,32 @@ import threading
 import sqlite3
 from datetime import datetime
 
-# Pinecone client (unchanged – comes from the pinecone-client package)
+import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
+
+# Pinecone client
 from pinecone import Pinecone, ServerlessSpec
 
-import pandas as pd
-
-# LangChain imports with correct namespaces
+# LangChain imports
 from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import Pinecone as LangchainPinecone
+from langchain_pinecone import PineconeVectorStore
 
-# Document loaders and parsers
+# Document loaders
 from pypdf import PdfReader
 from docx import Document
-
-from dotenv import load_dotenv
-load_dotenv()
 
 # --- Pinecone init ---
 pc = Pinecone(
     api_key=os.getenv("PINECONE_API_KEY")
 )
 INDEX_NAME = "briefing-index-2"
-if INDEX_NAME not in pc.list_indexes().names():  # Fixed: Changed to .names() method
+if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(
-        name=INDEX_NAME,  # Fixed: Added 'name=' parameter
+        name=INDEX_NAME,
         dimension=1536,
         metric="cosine",
         spec=ServerlessSpec(
@@ -42,7 +41,7 @@ if INDEX_NAME not in pc.list_indexes().names():  # Fixed: Changed to .names() me
 
 # --- Embedding + LLM clients ---
 embeddings = OpenAIEmbeddings()
-llm = ChatOpenAI(model="gpt-4-turbo", temperature=0.3)  # Fixed: Changed to gpt-4-turbo as gpt-4.1 doesn't exist
+llm = ChatOpenAI(model_name="gpt-4.1", temperature=0.3)
 
 # --- DB (SQLite) helpers ---
 DB_PATH = os.path.join(os.path.dirname(__file__), "reports.db")
@@ -59,18 +58,18 @@ CREATE TABLE IF NOT EXISTS reports (
     error TEXT,
     download_path TEXT
 )
-""")
+"""
+)
 conn.commit()
 
 def list_available_files():
-    """Return list of filenames in files/uploads."""
     UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     return os.listdir(UPLOAD_DIR)
 
+
 def index_file(filepath: str):
-    """Parse PDF/DOCX, split & index into Pinecone."""
-    # load text
+    """Parse PDF/DOCX/TXT, split & index into Pinecone."""
     if filepath.lower().endswith(".pdf"):
         reader = PdfReader(filepath)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
@@ -83,20 +82,20 @@ def index_file(filepath: str):
     else:
         return
 
-    # split & embed
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_text(text)
-    metas = [{"source": os.path.basename(filepath)}]*len(chunks)
+    metas = [{"source": os.path.basename(filepath)}] * len(chunks)
 
-    vectorstore = LangchainPinecone.from_existing_index(
+    # Use updated PineconeVectorStore
+    vectorstore = PineconeVectorStore(
         index_name=INDEX_NAME,
-        embedding=embeddings
+        embedding=embeddings,
+        pinecone_api_key=os.getenv("PINECONE_API_KEY"),
     )
-    vectorstore.add_texts(chunks, metadatas=metas)
+    vectorstore.add_texts(texts=chunks, metadatas=metas)
+
 
 def generate_briefing(report_id: str):
-    """Background thread to perform RAG + write out a txt file."""
-    # fetch report record
     cur = conn.cursor()
     cur.execute("SELECT prompt, files FROM reports WHERE id=?", (report_id,))
     row = cur.fetchone()
@@ -106,19 +105,19 @@ def generate_briefing(report_id: str):
     files = json.loads(files_json)
 
     try:
-        # build retriever filtered by source metadata
-        vectorstore = LangchainPinecone.from_existing_index(
+        # Build retriever with metadata filter
+        retriever = PineconeVectorStore(
             index_name=INDEX_NAME,
-            embedding=embeddings
-        ).as_retriever(search_kwargs={"k": 10, "filter": {"source": {"$in": files}}})  # Fixed: Added filter by source
-        
+            embedding=embeddings,
+            pinecone_api_key=os.getenv("PINECONE_API_KEY"),
+        ).as_retriever(search_kwargs={"k": 10, "filter": {"source": {"$in": files}}})
+
         chain = RetrievalQA.from_chain_type(
             llm=llm,
-            retriever=vectorstore,
+            retriever=retriever,
             chain_type="stuff"
         )
 
-        # craft meta-prompt
         meta = f"""
 Generate a briefing with sections:
 1) Actividades recientes
@@ -127,54 +126,61 @@ Generate a briefing with sections:
 4) KPIs
 5) Tareas planificadas
 
-Prompt: {prompt}
-"""  # Fixed: Removed the misleading "Limit retrieval to sources" since we're using filter
 
+---
+If there is no information for a section, please write "No hay información disponible".
+---
+
+Prompt: {prompt}
+"""
         result = chain.run(meta).strip()
 
-        # save out to disk
         out_dir = os.path.join(os.path.dirname(__file__), "reports")
         os.makedirs(out_dir, exist_ok=True)
         outfile = os.path.join(out_dir, f"{report_id}.txt")
         with open(outfile, "w", encoding="utf-8") as f:
             f.write(result)
 
-        # update DB
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE reports
             SET status='complete', download_path=?
             WHERE id=?
-        """, (outfile, report_id))
+            """, (outfile, report_id)
+        )
         conn.commit()
 
     except Exception as e:
-        cur.execute("""
+        cur.execute(
+            """
             UPDATE reports
             SET status='failed', error=?
             WHERE id=?
-        """, (str(e), report_id))
+            """, (str(e), report_id)
+        )
         conn.commit()
+        print(f"Error generating report {report_id}: {e}")
+
 
 def create_report(title: str, prompt: str, files: list[str]) -> dict:
-    """Insert new report record & launch background generation."""
-    # First make sure all files are indexed
     UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
     for file in files:
         filepath = os.path.join(UPLOAD_DIR, file)
         if os.path.exists(filepath):
             index_file(filepath)
-    
+
     report_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO reports
         (id, title, prompt, files, createdAt, status)
         VALUES (?, ?, ?, ?, ?, 'generating')
-    """, (report_id, title, prompt, json.dumps(files), now))
+        """, (report_id, title, prompt, json.dumps(files), now)
+    )
     conn.commit()
 
-    # start background thread
     thread = threading.Thread(target=generate_briefing, args=(report_id,))
     thread.daemon = True
     thread.start()
@@ -188,8 +194,8 @@ def create_report(title: str, prompt: str, files: list[str]) -> dict:
         "status": "generating"
     }
 
+
 def list_reports() -> list[dict]:
-    """Fetch all reports from SQLite."""
     cur = conn.cursor()
     cur.execute("SELECT id, title, prompt, files, createdAt, status, download_path, error FROM reports")
     rows = cur.fetchall()
@@ -207,8 +213,8 @@ def list_reports() -> list[dict]:
         })
     return result
 
+
 def get_report_path(report_id: str) -> str | None:
-    """Return the file path for download, or None."""
     cur = conn.cursor()
     cur.execute("SELECT download_path FROM reports WHERE id=?", (report_id,))
     row = cur.fetchone()

@@ -206,13 +206,15 @@ def generate_briefing(report_id: str):
         pdf_outfile = os.path.join(out_dir, f"{report_id}.pdf")
         export_to_pdf(result, pdf_outfile)
 
+        title = result.split("Briefing: ")[1].split("\n")[0]
+
         cur.execute(
             """
             UPDATE reports
-            SET status='complete', download_path=?
+            SET status='complete', download_path=?, title=?
             WHERE id=?
         """,
-            (pdf_outfile, report_id),
+            (pdf_outfile, title, report_id),
         )
         conn.commit()
 

@@ -95,10 +95,10 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
         </CardHeader>
         <CardContent>
           <ul className="list-disc pl-5 space-y-1">
-            {report.files.includes("auto") ? (
+            {report.projects.includes("auto") ? (
               <li>Auto-selected relevant files</li>
             ) : (
-              report.files.map((file) => <li key={file}>{file}</li>)
+              report.projects.map((project) => <li key={project}>{project}</li>)
             )}
           </ul>
         </CardContent>

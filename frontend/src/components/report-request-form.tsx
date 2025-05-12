@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { FileSelector } from "./file-selector";
+import { ProjectSelector } from "./file-selector";
 import type { ReportRequestFormProps } from "@/types/report";
 import { set } from "date-fns";
 import { ApiService } from "@/lib/service";
@@ -16,35 +16,35 @@ export function ReportRequestForm({
   isSubmitting,
 }: ReportRequestFormProps) {
   const [prompt, setPrompt] = useState("");
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [availableFiles, setAvailableFiles] = useState<string[]>([]);
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [availableProjects, setAvailableProjects] = useState<string[]>([]);
   const apiService = new ApiService();
 
   useEffect(() => {
-    const fetchFiles = async () => {
-      setAvailableFiles(await apiService.getAvailableFiles());
+    const fetchProjects = async () => {
+      setAvailableProjects(await apiService.getAvailableProjects());
     };
-    fetchFiles();
+    fetchProjects();
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (
       prompt.trim() &&
-      (selectedFiles.length > 0 || selectedFiles.includes("auto"))
+      (selectedProjects.length > 0 || selectedProjects.includes("auto"))
     ) {
-      onSubmit(prompt, selectedFiles);
+      onSubmit(prompt, selectedProjects);
       setPrompt("");
-      setSelectedFiles([]);
+      setSelectedProjects([]);
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <FileSelector
-        selectedFiles={selectedFiles}
-        onSelectFiles={setSelectedFiles}
-        availableFiles={availableFiles}
+      <ProjectSelector
+        selectedProjects={selectedProjects}
+        onSelectProjects={setSelectedProjects}
+        availableProjects={availableProjects}
       />
 
       <div className="flex items-end gap-2">
@@ -59,7 +59,7 @@ export function ReportRequestForm({
           type="submit"
           size="icon"
           disabled={
-            isSubmitting || !prompt.trim() || selectedFiles.length === 0
+            isSubmitting || !prompt.trim() || selectedProjects.length === 0
           }
           className="h-10 w-10 shrink-0"
         >

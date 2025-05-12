@@ -8,6 +8,7 @@ from rag import (
     create_report,
     list_reports,
     get_report_path,
+    list_projects,
 )
 
 app = Flask(__name__)
@@ -21,6 +22,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def available_files():
     files = list_available_files()
     return jsonify(files), 200
+
+
+@app.route("/projects/available", methods=["GET"])
+def available_projects():
+    return jsonify(list_projects()), 200
 
 
 @app.route("/files/upload", methods=["POST"])

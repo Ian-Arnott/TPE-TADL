@@ -17,48 +17,48 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import type { FileSelectorProps } from "@/types/report";
+import type { ProjectSelectorProps } from "@/types/report";
 
-export function FileSelector({
-  selectedFiles,
-  onSelectFiles,
-  availableFiles,
-}: FileSelectorProps) {
+export function ProjectSelector({
+  selectedProjects,
+  onSelectProjects,
+  availableProjects,
+}: ProjectSelectorProps) {
   const [open, setOpen] = useState(false);
 
   const handleSelectAuto = () => {
-    onSelectFiles(["auto"]);
+    onSelectProjects(["auto"]);
     setOpen(false);
   };
 
-  const handleSelectFile = (file: string) => {
+  const handleSelectProject = (project: string) => {
     // If "auto" is already selected, remove it
-    const newSelection = selectedFiles.includes("auto")
-      ? [file]
-      : selectedFiles.includes(file)
-      ? selectedFiles.filter((f) => f !== file)
-      : [...selectedFiles, file];
+    const newSelection = selectedProjects.includes("auto")
+      ? [project]
+      : selectedProjects.includes(project)
+      ? selectedProjects.filter((p: string) => p !== project)
+      : [...selectedProjects, project];
 
-    onSelectFiles(newSelection);
+    onSelectProjects(newSelection);
   };
 
-  const displayText = selectedFiles.includes("auto")
-    ? "Auto-select files"
-    : selectedFiles.length === 0
-    ? "Select files..."
-    : `${selectedFiles.length} file${
-        selectedFiles.length > 1 ? "s" : ""
+  const displayText = selectedProjects.includes("auto")
+    ? "Auto-select projects"
+    : selectedProjects.length === 0
+    ? "Select projects..."
+    : `${selectedProjects.length} project${
+        selectedProjects.length > 1 ? "s" : ""
       } selected`;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">Context Files</label>
-        {selectedFiles.length > 0 && !selectedFiles.includes("auto") && (
+        <label className="text-sm font-medium">Projects</label>
+        {selectedProjects.length > 0 && !selectedProjects.includes("auto") && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => onSelectFiles([])}
+            onClick={() => onSelectProjects([])}
             className="h-auto p-0 text-xs text-muted-foreground"
           >
             Clear
@@ -80,9 +80,9 @@ export function FileSelector({
         </PopoverTrigger>
         <PopoverContent className="w-[300px] p-0">
           <Command>
-            <CommandInput placeholder="Search files..." />
+            <CommandInput placeholder="Search projects..." />
             <CommandList>
-              <CommandEmpty>No files found.</CommandEmpty>
+              <CommandEmpty>No projects found.</CommandEmpty>
             </CommandList>
             <CommandList>
               <CommandGroup>
@@ -91,29 +91,29 @@ export function FileSelector({
                   className="flex items-center"
                 >
                   <div className="flex items-center gap-2 flex-1">
-                    <span>Auto-select relevant files</span>
+                    <span>Auto-select relevant projects</span>
                   </div>
-                  {selectedFiles.includes("auto") && (
+                  {selectedProjects.includes("auto") && (
                     <Check className="h-4 w-4 ml-2" />
                   )}
                 </CommandItem>
               </CommandGroup>
             </CommandList>
             <CommandList>
-              <CommandGroup heading="Available Files">
-                {availableFiles.map((file) => (
+              <CommandGroup heading="Available Projects">
+                {availableProjects.map((project: string) => (
                   <CommandItem
-                    key={file}
-                    onSelect={() => handleSelectFile(file)}
+                    key={project}
+                    onSelect={() => handleSelectProject(project)}
                     className="flex items-center"
-                    disabled={selectedFiles.includes("auto")}
+                    disabled={selectedProjects.includes("auto")}
                   >
                     <div className="flex items-center gap-2 flex-1">
                       <FileText className="h-4 w-4" />
-                      <span>{file}</span>
+                      <span>{project}</span>
                     </div>
-                    {selectedFiles.includes(file) &&
-                      !selectedFiles.includes("auto") && (
+                    {selectedProjects.includes(project) &&
+                      !selectedProjects.includes("auto") && (
                         <Check className="h-4 w-4 ml-2" />
                       )}
                   </CommandItem>
@@ -124,16 +124,16 @@ export function FileSelector({
         </PopoverContent>
       </Popover>
 
-      {selectedFiles.length > 0 && !selectedFiles.includes("auto") && (
+      {selectedProjects.length > 0 && !selectedProjects.includes("auto") && (
         <div className="flex flex-wrap gap-2 mt-2">
-          {selectedFiles.map((file) => (
+          {selectedProjects.map((project: string) => (
             <Badge
-              key={file}
+              key={project}
               variant="secondary"
               className="flex items-center gap-1"
             >
               <FileText className="h-3 w-3" />
-              {file}
+              {project}
             </Badge>
           ))}
         </div>

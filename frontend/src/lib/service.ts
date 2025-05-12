@@ -51,9 +51,21 @@ export class ApiService {
     }
   }
 
+  async getAvailableProjects(): Promise<string[]> {
+    try {
+      const response = await this.axiosInstance.get("/projects/available");
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching available projects:", error);
+      throw error;
+    }
+  }
+
   async downloadReport(reportId: string): Promise<Blob> {
     try {
-      const response = await this.axiosInstance.get(`/reports/download/${reportId}`);
+      const response = await this.axiosInstance.get(
+        `/reports/download/${reportId}`
+      );
       return new Blob([response.data], { type: "application/pdf" });
     } catch (error) {
       console.error("Error downloading report:", error);

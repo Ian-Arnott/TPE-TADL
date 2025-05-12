@@ -13,21 +13,36 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 client = AsyncOpenAI(api_key=api_key)
 
-# Configuration
+# Configuración
 projects = [
-    "TADL_RAG_SECRET_PROJECT",
-    "UX_OPENAI_REFACTOR",
-    "ITBA_NEW_AUTHENTICATION_SERVER",
+    {
+        "name": "TADL_RAG_SECRET_PROJECT",
+        "description": "Proyecto Secreto TADL RAG",
+        "status": "activo",
+        "outlook": "¡El proyecto va excelente! ¡Estamos logrando avances increíbles!",
+    },
+    {
+        "name": "UX_OPENAI_REFACTOR",
+        "description": "Refactorización UX OpenAI",
+        "status": "activo",
+        "outlook": "El proyecto va bien. Nada destacable.",
+    },
+    {
+        "name": "ITBA_NEW_AUTHENTICATION_SERVER",
+        "description": "Nuevo Servidor de Autenticación ITBA",
+        "status": "activo",
+        "outlook": "El proyecto muestra muy poco progreso. Muchas cosas no están funcionando como se esperaba.",
+    },
 ]
 num_files_per_project = 5
 output_dir = "backend/uploads"
 
 
 async def generate_ai_content(prompt: str, model: str = "gpt-4.1") -> str:
-    """Call OpenAI ChatCompletion to generate content asynchronously."""
+    """Llama a OpenAI ChatCompletion para generar contenido asincrónicamente."""
     system_message = {
         "role": "system",
-        "content": "You are a synthetic data generator. No one reads your output, so you are non verbose. You only return the content requested. No extra formatting, no markdown, nothing. Just the content.",
+        "content": "Eres un generador de datos sintéticos para documentación de proyectos de software. Genera contenido realista y detallado que incluya: actividades recientes, problemas/bloqueos, interacciones con otros equipos, KPIs específicos y tareas planificadas. Usa lenguaje técnico apropiado. Sin formato extra, solo contenido.",
     }
     response = await client.responses.create(
         model=model,
@@ -38,7 +53,7 @@ async def generate_ai_content(prompt: str, model: str = "gpt-4.1") -> str:
 
 
 async def create_pdf(project: str, i: int, timestamp: str, content: str) -> str:
-    """Create a PDF file with the given content."""
+    """Crea un archivo PDF con el contenido dado."""
     project_dir = os.path.join(output_dir, project)
     os.makedirs(project_dir, exist_ok=True)
 
@@ -55,7 +70,7 @@ async def create_pdf(project: str, i: int, timestamp: str, content: str) -> str:
 
 
 async def create_docx(project: str, i: int, timestamp: str, content: str) -> str:
-    """Create a DOCX file with the given content."""
+    """Crea un archivo DOCX con el contenido dado."""
     project_dir = os.path.join(output_dir, project)
     os.makedirs(project_dir, exist_ok=True)
 
@@ -66,7 +81,17 @@ async def create_docx(project: str, i: int, timestamp: str, content: str) -> str
         doc = Document()
         doc.add_heading(f"{project} Brief #{i}", level=1)
         for para in content.split("\n\n"):
-            doc.add_paragraph(para)
+            # Check if paragraph contains markdown headings or lists
+            if (
+                para.strip().startswith("#")
+                or para.strip().startswith("*")
+                or para.strip().startswith("-")
+            ):
+                # Add heading or list item directly
+                doc.add_paragraph(para)
+            else:
+                # Regular paragraph
+                doc.add_paragraph(para)
         doc.save(full_path)
 
     await asyncio.to_thread(_create_docx)
@@ -74,7 +99,7 @@ async def create_docx(project: str, i: int, timestamp: str, content: str) -> str
 
 
 async def create_json(project: str, i: int, timestamp: str, content: str) -> str:
-    """Create a JSON file with Slack-style conversation."""
+    """Crea un archivo JSON con una conversación estilo Slack."""
     project_dir = os.path.join(output_dir, project)
     os.makedirs(project_dir, exist_ok=True)
 
@@ -90,7 +115,7 @@ async def create_json(project: str, i: int, timestamp: str, content: str) -> str
 
 
 async def create_csv(project: str, i: int, timestamp: str, content: str) -> str:
-    """Create a CSV file with the given content."""
+    """Crea un archivo CSV con el contenido dado."""
     project_dir = os.path.join(output_dir, project)
     os.makedirs(project_dir, exist_ok=True)
 
@@ -103,47 +128,54 @@ async def create_csv(project: str, i: int, timestamp: str, content: str) -> str:
     return csv_filename
 
 
-async def process_file_set(project: str, i: int):
-    """Process a complete set of files for a project."""
+async def process_file_set(project: dict, i: int):
+    """Procesa un conjunto completo de archivos para un proyecto."""
+    project_name = project["name"]
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
+    context = f"Contexto del proyecto: '{project['description']}'. Estado: '{project['status']}'. Perspectiva: '{project['outlook']}'"
+
     pdf_content_task = generate_ai_content(
-        f"Write a brief project update summary for '{project}', about 150 words."
+        f"Escribe un resumen detallado (250-300 palabras) del proyecto '{project_name}'. {context}. Incluye: estado actual, logros recientes, problemas identificados y próximos pasos. Menciona KPIs específicos, avances en el sprint actual y cualquier interacción con otros equipos. Usa términos técnicos y fechas concretas."
     )
+
     docx_content_task = generate_ai_content(
-        f"Create a Project Brief with headings and bullet points for '{project}'."
+        f"Crea un Brief completo para '{project_name}'. {context}. Utiliza las siguientes secciones en formato markdown:\n# Resumen Ejecutivo\n## Objetivos del Sprint\n## Actividades Completadas\n## Problemas Técnicos\n## Interacciones con Otros Equipos\n## Métricas y KPIs\n## Plan de Trabajo\nIncluye detalles técnicos específicos, menciona tecnologías relevantes, y asigna tareas a miembros del equipo."
     )
+
     json_content_task = generate_ai_content(
-        f"Generate a JSON array of 5 Slack-style messages between two team members discussing '{project}' progress. "
-        "Each message should include `user`, `text`, and `ts` fields."
+        f"Genera un arreglo JSON de 8-10 mensajes realistas entre miembros del equipo discutiendo '{project_name}'. {context}. Incluye discusiones sobre problemas técnicos, logros, bloqueos y próximos pasos. Cada mensaje debe tener `user` (nombres reales), `text` (con menciones, emojis y referencias técnicas), `ts` (timestamp) y `reactions` (opcional). Representa una conversación técnica auténtica."
     )
+
     csv_content_task = generate_ai_content(
-        f"Provide CSV-formatted project metrics for '{project}' with columns: date, metric, value. Include 5 rows."
+        f"Proporciona métricas detalladas del proyecto '{project_name}'. {context}. Formato CSV con las columnas: fecha,categoría,métrica,valor,tendencia,responsable. Incluye 8-10 filas con métricas como velocidad de sprint, bugs por release, cobertura de código, tiempo de ciclo, etc. Usa valores realistas y fechas recientes."
     )
 
     pdf_content, docx_content, json_content, csv_content = await asyncio.gather(
         pdf_content_task, docx_content_task, json_content_task, csv_content_task
     )
 
-    pdf_task = create_pdf(project, i, timestamp, pdf_content)
-    docx_task = create_docx(project, i, timestamp, docx_content)
-    json_task = create_json(project, i, timestamp, json_content)
-    csv_task = create_csv(project, i, timestamp, csv_content)
+    pdf_task = create_pdf(project_name, i, timestamp, pdf_content)
+    docx_task = create_docx(project_name, i, timestamp, docx_content)
+    json_task = create_json(project_name, i, timestamp, json_content)
+    csv_task = create_csv(project_name, i, timestamp, csv_content)
 
     pdf_filename, docx_filename, json_filename, csv_filename = await asyncio.gather(
         pdf_task, docx_task, json_task, csv_task
     )
 
-    project_dir = os.path.join(output_dir, project)
+    project_dir = os.path.join(output_dir, project_name)
     print(
-        f"Generated files for {project} in {project_dir}: {pdf_filename}, {docx_filename}, {json_filename}, {csv_filename}"
+        f"Archivos generados para {project_name} en {project_dir}: {pdf_filename}, {docx_filename}, {json_filename}, {csv_filename}"
     )
 
 
 async def main():
-    """Main entry point for the script."""
+    """Punto de entrada principal del script."""
     os.makedirs(output_dir, exist_ok=True)
-    print(f"Saving all generated files to directory: {os.path.abspath(output_dir)}")
+    print(
+        f"Guardando todos los archivos generados en el directorio: {os.path.abspath(output_dir)}"
+    )
 
     tasks = []
     for project in projects:
@@ -151,7 +183,9 @@ async def main():
             tasks.append(process_file_set(project, i))
 
     await asyncio.gather(*tasks)
-    print(f"Completed generating {len(tasks)} file sets in {output_dir}")
+    print(
+        f"Completada la generación de {len(tasks)} conjuntos de archivos en {output_dir}"
+    )
 
 
 if __name__ == "__main__":

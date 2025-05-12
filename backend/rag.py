@@ -20,7 +20,9 @@ load_dotenv()
 
 openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-INDEX_NAME = "briefing-index-3"
+INDEX_NAME = "briefing-index"
+BASE_DIR = os.path.dirname(__file__)
+DB_PATH = os.path.join(BASE_DIR, "reports.db")
 
 # ─── Embedding dimension ──────────────────────────────────────────────────────
 test_embedding = openai.embeddings.create(input="test", model="text-embedding-3-small")
@@ -44,10 +46,88 @@ def get_index():
     return pc.Index(INDEX_NAME)
 
 
+# ─── Embedding & indexing ─────────────────────────────────────────────────────
+
+
+def embed_text(text: str) -> list[float]:
+    resp = openai.embeddings.create(input=text, model="text-embedding-3-small")
+    return resp.data[0].embedding
+
+
+def index_file(filepath: str, project: str, force: bool = False):
+    """Parse PDF/DOCX/TXT, split & index into Pinecone."""
+    try:
+        # Get file's last modification time
+        file_mtime = os.path.getmtime(filepath)
+
+        # Check if file has been indexed and hasn't changed
+        if not force:
+            cur.execute(
+                "SELECT last_modified FROM indexed_files WHERE file_path = ?",
+                (filepath,),
+            )
+            result = cur.fetchone()
+            if result and result[0] == file_mtime:
+                return  # Skip indexing if file hasn't changed
+
+        if filepath.lower().endswith(".pdf"):
+            reader = PdfReader(filepath)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        elif filepath.lower().endswith(".docx"):
+            doc = Document(filepath)
+            text = "\n".join(p.text for p in doc.paragraphs)
+        elif filepath.lower().endswith(".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                text = f.read()
+        else:
+            return
+
+        chunk_size = 500
+        overlap = 50
+        chunks: List[str] = []
+        for i in range(0, len(text), chunk_size - overlap):
+            chunks.append(text[i : i + chunk_size])
+
+        # First delete any existing vectors for this file
+        index = get_index()
+        index.delete(filter={"source": os.path.basename(filepath)})
+
+        vectors: List[Vector] = []
+        for i, chunk in enumerate(chunks):
+            emb = embed_text(chunk)
+            id = f"{os.path.basename(filepath)}-{i}"
+            meta = {
+                "source": os.path.basename(filepath),
+                "text": chunk,
+                "project": project,
+            }
+            to_append = {"id": id, "values": emb, "metadata": meta}
+            vectors.append(to_append)
+
+        index.upsert(vectors=vectors)
+
+        # Update indexed_files table
+        now = int(datetime.now().timestamp())
+        cur.execute(
+            "INSERT OR REPLACE INTO indexed_files (file_path, project, last_modified, last_indexed) VALUES (?, ?, ?, ?)",
+            (filepath, project, file_mtime, now),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error indexing file {filepath}: {e}")
+
+
+def index_all_files(force: bool = False):
+    for root, dirs, files in os.walk(os.path.join(BASE_DIR, "uploads")):
+        for file in files:
+            index_file(os.path.join(root, file), os.path.basename(root), force)
+
+
+index_all_files()
+print("Indexing complete")
+
 # ─── SQLite (for report tracking) ───────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(__file__)
-DB_PATH = os.path.join(BASE_DIR, "reports.db")
 
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cur = conn.cursor()
@@ -57,11 +137,21 @@ CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY,
     title TEXT,
     prompt TEXT,
-    files TEXT,
+    projects TEXT,
     createdAt TEXT,
     status TEXT,
     error TEXT,
     download_path TEXT
+)
+"""
+)
+cur.execute(
+    """
+CREATE TABLE IF NOT EXISTS indexed_files (
+    file_path TEXT PRIMARY KEY,
+    project TEXT,
+    last_modified INTEGER,
+    last_indexed INTEGER
 )
 """
 )
@@ -87,72 +177,47 @@ def list_available_files():
     return files
 
 
-# ─── Embedding & indexing ─────────────────────────────────────────────────────
-
-
-def embed_text(text: str) -> list[float]:
-    resp = openai.embeddings.create(input=text, model="text-embedding-3-small")
-    return resp.data[0].embedding
-
-
-def index_file(filepath: str):
-    """Parse PDF/DOCX/TXT, split & index into Pinecone."""
-    try:
-        if filepath.lower().endswith(".pdf"):
-            reader = PdfReader(filepath)
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        elif filepath.lower().endswith(".docx"):
-            doc = Document(filepath)
-            text = "\n".join(p.text for p in doc.paragraphs)
-        elif filepath.lower().endswith(".txt"):
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
-        else:
-            return
-
-        chunk_size = 500
-        overlap = 50
-        chunks: List[str] = []
-        for i in range(0, len(text), chunk_size - overlap):
-            chunks.append(text[i : i + chunk_size])
-
-        index = get_index()
-        vectors: List[Vector] = []
-        for i, chunk in enumerate(chunks):
-            emb = embed_text(chunk)
-            id = f"{os.path.basename(filepath)}-{i}"
-            meta = {"source": os.path.basename(filepath), "text": chunk}
-            to_append = {"id": id, "values": emb, "metadata": meta}
-            vectors.append(to_append)
-
-        index.upsert(vectors=vectors)
-    except Exception as e:
-        print(f"Error indexing file {filepath}: {e}")
+def list_projects():
+    """Return all subdirectories in the uploads directory."""
+    projects_dir = os.path.join(BASE_DIR, "uploads")
+    return [
+        name
+        for name in os.listdir(projects_dir)
+        if os.path.isdir(os.path.join(projects_dir, name))
+    ]
 
 
 # ─── Briefing generation ──────────────────────────────────────────────────────
 
 
-def generate_briefing(report_id: str):
+def generate_briefing(report_id: str, projects: list[str]):
     cur = conn.cursor()
-    cur.execute("SELECT prompt, files FROM reports WHERE id=?", (report_id,))
+    cur.execute("SELECT prompt, projects FROM reports WHERE id=?", (report_id,))
     row = cur.fetchone()
     if not row:
         return
-    prompt, files_json = row
-    files = json.loads(files_json)
+    prompt, projects_json = row
+    projects = json.loads(projects_json)
 
     try:
         query_emb = embed_text(prompt)
 
         index = get_index()
-        query_resp = index.query(
-            include_values=True,
-            include_metadata=True,
-            vector=query_emb,
-            top_k=10,
-            filter={"source": {"$in": files}},
-        )
+        if "any" in projects:
+            query_resp = index.query(
+                include_values=True,
+                include_metadata=True,
+                vector=query_emb,
+                top_k=15,
+            )
+        else:
+            query_resp = index.query(
+                include_values=True,
+                include_metadata=True,
+                vector=query_emb,
+                top_k=15,
+                filter={"project": {"$in": projects}},
+            )
         contexts = [match["metadata"]["text"] for match in query_resp["matches"]]
         context = "\n\n".join(contexts) if contexts else ""
 
@@ -234,14 +299,8 @@ def generate_briefing(report_id: str):
 # ─── Report-management API ────────────────────────────────────────────────────
 
 
-def create_report(title: str, prompt: str, files: list[str]) -> dict:
+def create_report(title: str, prompt: str, projects: list[str]) -> dict:
     try:
-
-        upload_dir = os.path.join(BASE_DIR, "uploads")
-        for filename in files:
-            path = os.path.join(upload_dir, filename)
-            if os.path.exists(path):
-                index_file(path)
 
         report_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
@@ -249,14 +308,14 @@ def create_report(title: str, prompt: str, files: list[str]) -> dict:
         cur.execute(
             """
             INSERT INTO reports
-            (id, title, prompt, files, createdAt, status)
+            (id, title, prompt, projects, createdAt, status)
             VALUES (?, ?, ?, ?, ?, 'generating')
         """,
-            (report_id, title, prompt, json.dumps(files), now),
+            (report_id, title, prompt, json.dumps(projects), now),
         )
         conn.commit()
 
-        thread = threading.Thread(target=generate_briefing, args=(report_id,))
+        thread = threading.Thread(target=generate_briefing, args=(report_id, projects))
         thread.daemon = True
         thread.start()
 
@@ -264,7 +323,7 @@ def create_report(title: str, prompt: str, files: list[str]) -> dict:
             "id": report_id,
             "title": title,
             "prompt": prompt,
-            "files": files,
+            "projects": projects,
             "createdAt": now,
             "status": "generating",
         }
@@ -276,7 +335,7 @@ def create_report(title: str, prompt: str, files: list[str]) -> dict:
 def list_reports() -> list[dict]:
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, title, prompt, files, createdAt, status, download_path, error FROM reports"
+        "SELECT id, title, prompt, projects, createdAt, status, download_path, error FROM reports"
     )
     rows = cur.fetchall()
     result = []
@@ -286,7 +345,7 @@ def list_reports() -> list[dict]:
                 "id": r[0],
                 "title": r[1],
                 "prompt": r[2],
-                "files": json.loads(r[3]),
+                "projects": json.loads(r[3]),
                 "createdAt": r[4],
                 "status": r[5],
                 "downloadUrl": r[6] if r[6] else None,

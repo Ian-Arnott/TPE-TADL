@@ -37,6 +37,7 @@ export default function ReportsPage() {
 
   const handleSubmitRequest = async (prompt: string, files: string[]) => {
     setIsSubmitting(true);
+    setSelectedReportId(undefined);
 
     try {
       await apiService.createReport(prompt, "New Report", files);

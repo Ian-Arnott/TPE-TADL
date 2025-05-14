@@ -12,6 +12,8 @@ from pinecone import Pinecone, ServerlessSpec, Vector
 from pypdf import PdfReader
 from docx import Document
 
+from tqdm import tqdm
+
 from helpers import export_to_pdf
 
 load_dotenv()
@@ -20,7 +22,7 @@ load_dotenv()
 
 openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-INDEX_NAME = "briefing-index"
+INDEX_NAME = "briefing-index-final"
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "reports.db")
 
@@ -32,6 +34,7 @@ print(f"Embedding size: {embedding_size}")
 # ─── Pinecone init ────────────────────────────────────────────────────────────
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
+print(pc.list_indexes().names())
 
 if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(
@@ -45,86 +48,6 @@ if INDEX_NAME not in pc.list_indexes().names():
 def get_index():
     return pc.Index(INDEX_NAME)
 
-
-# ─── Embedding & indexing ─────────────────────────────────────────────────────
-
-
-def embed_text(text: str) -> list[float]:
-    resp = openai.embeddings.create(input=text, model="text-embedding-3-small")
-    return resp.data[0].embedding
-
-
-def index_file(filepath: str, project: str, force: bool = False):
-    """Parse PDF/DOCX/TXT, split & index into Pinecone."""
-    try:
-        # Get file's last modification time
-        file_mtime = os.path.getmtime(filepath)
-
-        # Check if file has been indexed and hasn't changed
-        if not force:
-            cur.execute(
-                "SELECT last_modified FROM indexed_files WHERE file_path = ?",
-                (filepath,),
-            )
-            result = cur.fetchone()
-            if result and result[0] == file_mtime:
-                return  # Skip indexing if file hasn't changed
-
-        if filepath.lower().endswith(".pdf"):
-            reader = PdfReader(filepath)
-            text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        elif filepath.lower().endswith(".docx"):
-            doc = Document(filepath)
-            text = "\n".join(p.text for p in doc.paragraphs)
-        elif filepath.lower().endswith(".txt"):
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
-        else:
-            return
-
-        chunk_size = 500
-        overlap = 50
-        chunks: List[str] = []
-        for i in range(0, len(text), chunk_size - overlap):
-            chunks.append(text[i : i + chunk_size])
-
-        # First delete any existing vectors for this file
-        index = get_index()
-        index.delete(filter={"source": os.path.basename(filepath)})
-
-        vectors: List[Vector] = []
-        for i, chunk in enumerate(chunks):
-            emb = embed_text(chunk)
-            id = f"{os.path.basename(filepath)}-{i}"
-            meta = {
-                "source": os.path.basename(filepath),
-                "text": chunk,
-                "project": project,
-            }
-            to_append = {"id": id, "values": emb, "metadata": meta}
-            vectors.append(to_append)
-
-        index.upsert(vectors=vectors)
-
-        # Update indexed_files table
-        now = int(datetime.now().timestamp())
-        cur.execute(
-            "INSERT OR REPLACE INTO indexed_files (file_path, project, last_modified, last_indexed) VALUES (?, ?, ?, ?)",
-            (filepath, project, file_mtime, now),
-        )
-        conn.commit()
-    except Exception as e:
-        print(f"Error indexing file {filepath}: {e}")
-
-
-def index_all_files(force: bool = False):
-    for root, dirs, files in os.walk(os.path.join(BASE_DIR, "uploads")):
-        for file in files:
-            index_file(os.path.join(root, file), os.path.basename(root), force)
-
-
-index_all_files()
-print("Indexing complete")
 
 # ─── SQLite (for report tracking) ───────────────────────────────────────────────
 
@@ -156,6 +79,101 @@ CREATE TABLE IF NOT EXISTS indexed_files (
 """
 )
 conn.commit()
+
+
+# ─── Embedding & indexing ─────────────────────────────────────────────────────
+
+
+def embed_text(text: str) -> list[float]:
+    resp = openai.embeddings.create(input=text, model="text-embedding-3-small")
+    return resp.data[0].embedding
+
+
+def index_file(filepath: str, project: str, force: bool = False):
+    """Parse PDF/DOCX/TXT, split & index into Pinecone."""
+    try:
+        # Get file's last modification time
+        file_mtime = os.path.getmtime(filepath)
+
+        # Check if file has been indexed and hasn't changed
+        if not force:
+            cur.execute(
+                "SELECT last_modified FROM indexed_files WHERE file_path = ?",
+                (filepath,),
+            )
+            result = cur.fetchone()
+            if result and result[0] == int(file_mtime):
+                return  # Skip indexing if file hasn't changed
+
+        if filepath.lower().endswith(".pdf"):
+            reader = PdfReader(filepath)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        elif filepath.lower().endswith(".docx"):
+            doc = Document(filepath)
+            text = "\n".join(p.text for p in doc.paragraphs)
+        elif filepath.lower().endswith(".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                text = f.read()
+        elif filepath.lower().endswith(".csv"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                text = f.read()
+        elif filepath.lower().endswith(".json"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                text = str(json.load(f))
+        else:
+            return
+
+        chunk_size = 500
+        overlap = 50
+        chunks: List[str] = []
+        for i in range(0, len(text), chunk_size - overlap):
+            chunks.append(text[i : i + chunk_size])
+
+        # First delete any existing vectors for this file
+        try:
+            index = get_index()
+            index.delete(
+                filter={"source": os.path.basename(filepath)}, namespace="main"
+            )
+        except Exception as e:
+            # Do nothing
+            pass
+
+        vectors: List[Vector] = []
+        for i, chunk in enumerate(chunks):
+            emb = embed_text(chunk)
+            id = f"{os.path.basename(filepath)}-{i}"
+            meta = {
+                "source": os.path.basename(filepath),
+                "text": chunk,
+                "project": project,
+            }
+            to_append = {"id": id, "values": emb, "metadata": meta}
+            vectors.append(to_append)
+
+        index.upsert(vectors=vectors, namespace="main")
+
+        file_mtime = int(file_mtime)
+        cur.execute(
+            "INSERT OR REPLACE INTO indexed_files (file_path, project, last_modified, last_indexed) VALUES (?, ?, ?, ?)",
+            (filepath, project, file_mtime, file_mtime),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error indexing file {filepath}: {e}")
+
+
+def index_all_files(force: bool = False):
+    files_to_index = []
+    for root, dirs, files in os.walk(os.path.join(BASE_DIR, "uploads")):
+        for file in files:
+            files_to_index.append((root, file))
+    for root, file in tqdm(files_to_index, desc="Indexing files"):
+        index_file(os.path.join(root, file), os.path.basename(root), force)
+
+
+index_all_files()
+print("Indexing complete")
 
 # ─── File utilities ────────────────────────────────────────────────────────────
 
@@ -209,6 +227,7 @@ def generate_briefing(report_id: str, projects: list[str]):
                 include_metadata=True,
                 vector=query_emb,
                 top_k=15,
+                namespace="main",
             )
         else:
             query_resp = index.query(
@@ -217,6 +236,7 @@ def generate_briefing(report_id: str, projects: list[str]):
                 vector=query_emb,
                 top_k=15,
                 filter={"project": {"$in": projects}},
+                namespace="main",
             )
         contexts = [match["metadata"]["text"] for match in query_resp["matches"]]
         context = "\n\n".join(contexts) if contexts else ""

@@ -1,0 +1,22 @@
+# TPE-TADL
+
+## Configuración de variables de entorno
+
+- En `backend/.env`:
+  - `OPENAI_API_KEY`
+  - `PINECONE_API_KEY`
+- En `frontend/.env`:
+  - `NEXT_PUBLIC_API_URL` (normalmente: http://localhost:8000)
+
+## Scripts útiles
+
+- `generate-data`: Genera datos sintéticos (borra los datos previos).
+- `run-backend`: Inicia el backend en el puerto 8000. (tiene que estar disponible)
+- `reset-db`: Resetea la base de datos.
+- `run-frontend`: Inicia el frontend en el puerto 3000. (tiene que estar disponible)
+
+## Acceso al frontend
+
+El frontend está disponible en: [https://tpe-tadl.vercel.app/](https://tpe-tadl.vercel.app/)
+
+Solo es necesario correr el backend localmente en el puerto 8000 para que funcione correctamente.

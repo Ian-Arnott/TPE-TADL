@@ -13,3 +13,5 @@ pandas
 sqlite-utils
 reportlab
 ragas
+seaborn
+matplotlib

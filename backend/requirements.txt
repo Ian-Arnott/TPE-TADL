@@ -12,3 +12,4 @@ python-docx
 pandas
 sqlite-utils
 reportlab
+ragas

@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Optional
 import uuid
 import json
 import threading
@@ -15,6 +15,15 @@ from docx import Document
 from tqdm import tqdm
 
 from helpers import export_to_pdf
+
+from ragas import evaluate, SingleTurnSample
+from ragas.metrics import (
+    context_precision,
+    context_recall,
+    answer_relevancy,
+    faithfulness,
+)
+
 
 load_dotenv()
 
@@ -241,6 +250,28 @@ def generate_briefing(report_id: str, projects: list[str]):
         contexts = [match["metadata"]["text"] for match in query_resp["matches"]]
         context = "\n\n".join(contexts) if contexts else ""
 
+        sample = SingleTurnSample(
+           user_input=prompt,
+            retrieved_context=context,
+            reference_answer=None,  # or supply a golden briefing if you have one
+            )
+        
+                # select the metrics you care about
+        metrics_to_run = [
+            context_precision,
+            context_recall,
+            answer_relevancy,
+            faithfulness,
+        ]
+
+            # run evaluation; since no llm/embeddings passed, RAGAS uses its default OpenAI LLM and embedder
+        eval_results = evaluate(
+                samples=[sample],
+                metrics=metrics_to_run,
+            )
+        metrics = eval_results[0]  # dict like {'context_precision': 0.75, 'context_recall':0.60, …}
+        print(f"Metrics: {metrics}")
+
         system_msg = {
             "role": "system",
             "content": "Sos un asistente que genera briefings para distintos equipos de trabajo. El briefing debe ser en español, con formato markdown. Es muy importante unicamente incluir la información relevante y real para el equipo en cuestión.",
@@ -375,7 +406,7 @@ def list_reports() -> list[dict]:
     return result
 
 
-def get_report_path(report_id: str) -> str | None:
+def get_report_path(report_id: str) -> Optional[str]:
     cur = conn.cursor()
     cur.execute("SELECT download_path FROM reports WHERE id=?", (report_id,))
     row = cur.fetchone()

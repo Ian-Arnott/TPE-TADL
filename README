@@ -1,22 +1,38 @@
 # TPE-TADL
 
+Proyecto que genera briefings automáticos para reuniones, utilizando como fuentes conversaciones, documentos y métricas. 
+
+---
+
 ## Configuración de variables de entorno
 
-- En `backend/.env`:
-  - `OPENAI_API_KEY`
-  - `PINECONE_API_KEY`
-- En `frontend/.env`:
-  - `NEXT_PUBLIC_API_URL` (normalmente: http://localhost:8000)
+### Backend (`backend/.env`)
+
+* `OPENAI_API_KEY`: Clave de API de OpenAI para generar texto.
+* `PINECONE_API_KEY`: Clave de API de Pinecone para la base vectorial.
+
+### Frontend (`frontend/.env`)
+
+* `NEXT_PUBLIC_API_URL`: URL del backend. Por defecto: `http://localhost:8000`
+
+---
 
 ## Scripts útiles
 
-- `generate-data`: Genera datos sintéticos (borra los datos previos).
-- `run-backend`: Inicia el backend en el puerto 8000. (tiene que estar disponible)
-- `reset-db`: Resetea la base de datos.
-- `run-frontend`: Inicia el frontend en el puerto 3000. (tiene que estar disponible)
+> Ejecutar estos comandos desde la raíz del proyecto o la carpeta correspondiente.
 
-## Acceso al frontend
+* `generate-data`: Genera datos sintéticos desde cero (elimina datos previos).
+* `reset-db`: Resetea la base de datos por completo.
+* `run-backend`: Levanta el backend (Flask) en el puerto **8000**.
+* `run-frontend`: Inicia el frontend (Next.js) en el puerto **3000**.
 
-El frontend está disponible en: [https://tpe-tadl.vercel.app/](https://tpe-tadl.vercel.app/)
+---
 
-Solo es necesario correr el backend localmente en el puerto 8000 para que funcione correctamente.
+## Acceso al Frontend
+
+El frontend está disponible en producción aquí: [https://tpe-tadl.vercel.app/](https://tpe-tadl.vercel.app/)
+
+Para usarlo localmente:
+
+1. Asegúrate de que el backend esté corriendo en `http://localhost:8000`.
+2. Inicia el frontend con `run-frontend`.

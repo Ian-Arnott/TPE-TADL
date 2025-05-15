@@ -7,6 +7,10 @@ export interface Report {
   projects: string[];
   downloadUrl?: string;
   error?: string;
+  contextPrecision?: string;
+  contextRecall?: string;
+  answerRelevancy?: string;
+  faithfulness?: string;
 }
 
 export type ReportStatus = "generating" | "complete" | "failed";

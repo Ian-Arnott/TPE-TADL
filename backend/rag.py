@@ -15,10 +15,9 @@ from docx import Document
 from tqdm import tqdm
 
 from helpers import export_to_pdf
-
-from ragas import evaluate, SingleTurnSample
+from ragas import EvaluationDataset, SingleTurnSample, evaluate
 from ragas.metrics import (
-    context_precision,
+    LLMContextPrecisionWithoutReference,
     context_recall,
     answer_relevancy,
     faithfulness,
@@ -73,7 +72,11 @@ CREATE TABLE IF NOT EXISTS reports (
     createdAt TEXT,
     status TEXT,
     error TEXT,
-    download_path TEXT
+    download_path TEXT,
+    context_precision TEXT,
+    context_recall TEXT,
+    answer_relevancy TEXT,
+    faithfulness TEXT
 )
 """
 )
@@ -214,6 +217,53 @@ def list_projects():
     ]
 
 
+# ─── RAGAS evaluation ────────────────────────────────────────────────────────
+
+
+def run_ragas_eval(
+    report_id: str,
+    user_instructions: str,
+    contexts: list[str],
+    result: str,
+):
+    try:
+        ragas_sample = SingleTurnSample(
+            user_input=user_instructions,
+            retrieved_contexts=contexts,
+            response=result,
+        )
+        dataset = EvaluationDataset([ragas_sample])
+        ragas_result = evaluate(
+            dataset,
+            metrics=[
+                LLMContextPrecisionWithoutReference(),
+                # context_recall, # No trabajamos con reference
+                answer_relevancy,
+                faithfulness,
+            ],
+        )
+        print(ragas_result.scores)
+        print(ragas_result.scores[0]["llm_context_precision_without_reference"])
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE reports
+            SET context_precision=?, context_recall=?, answer_relevancy=?, faithfulness=?
+            WHERE id=?
+            """,
+            (
+                str(ragas_result.scores[0]["llm_context_precision_without_reference"]),
+                "",
+                str(ragas_result.scores[0]["answer_relevancy"]),
+                str(ragas_result.scores[0]["faithfulness"]),
+                report_id,
+            ),
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Error running RAGAS evaluation: {e}")
+
+
 # ─── Briefing generation ──────────────────────────────────────────────────────
 
 
@@ -249,28 +299,6 @@ def generate_briefing(report_id: str, projects: list[str]):
             )
         contexts = [match["metadata"]["text"] for match in query_resp["matches"]]
         context = "\n\n".join(contexts) if contexts else ""
-
-        sample = SingleTurnSample(
-           user_input=prompt,
-            retrieved_context=context,
-            reference_answer=None,  # or supply a golden briefing if you have one
-            )
-        
-                # select the metrics you care about
-        metrics_to_run = [
-            context_precision,
-            context_recall,
-            answer_relevancy,
-            faithfulness,
-        ]
-
-            # run evaluation; since no llm/embeddings passed, RAGAS uses its default OpenAI LLM and embedder
-        eval_results = evaluate(
-                samples=[sample],
-                metrics=metrics_to_run,
-            )
-        metrics = eval_results[0]  # dict like {'context_precision': 0.75, 'context_recall':0.60, …}
-        print(f"Metrics: {metrics}")
 
         system_msg = {
             "role": "system",
@@ -311,6 +339,12 @@ def generate_briefing(report_id: str, projects: list[str]):
             temperature=0.3,
         )
         result = chat_resp.output_text.strip()
+
+        threading.Thread(
+            target=run_ragas_eval,
+            args=(report_id, user_instructions, contexts, result),
+            daemon=True,
+        ).start()
 
         out_dir = os.path.join(BASE_DIR, "reports")
         os.makedirs(out_dir, exist_ok=True)
@@ -385,9 +419,7 @@ def create_report(title: str, prompt: str, projects: list[str]) -> dict:
 
 def list_reports() -> list[dict]:
     cur = conn.cursor()
-    cur.execute(
-        "SELECT id, title, prompt, projects, createdAt, status, download_path, error FROM reports"
-    )
+    cur.execute("SELECT * FROM reports")
     rows = cur.fetchall()
     result = []
     for r in rows:
@@ -401,6 +433,10 @@ def list_reports() -> list[dict]:
                 "status": r[5],
                 "downloadUrl": r[6] if r[6] else None,
                 "error": r[7] if r[7] else None,
+                "contextPrecision": r[8] if r[8] else None,
+                "contextRecall": r[9] if r[9] else None,
+                "answerRelevancy": r[10] if r[10] else None,
+                "faithfulness": r[11] if r[11] else None,
             }
         )
     return result

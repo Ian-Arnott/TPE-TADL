@@ -106,6 +106,17 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-sm font-medium">Report Metrics</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p>Context Precision: {report.contextPrecision || "N/A"}</p>
+          <p>Answer Relevancy: {report.answerRelevancy || "N/A"}</p>
+          <p>Faithfulness: {report.faithfulness || "N/A"}</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-sm font-medium">Report Preview</CardTitle>
         </CardHeader>
         <CardContent>

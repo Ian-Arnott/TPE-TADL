@@ -36,8 +36,8 @@ export function ProjectSelector({
     const newSelection = selectedProjects.includes("auto")
       ? [project]
       : selectedProjects.includes(project)
-      ? selectedProjects.filter((p: string) => p !== project)
-      : [...selectedProjects, project];
+        ? selectedProjects.filter((p: string) => p !== project)
+        : [...selectedProjects, project];
 
     onSelectProjects(newSelection);
   };
@@ -45,9 +45,8 @@ export function ProjectSelector({
   const displayText = selectedProjects.includes("auto")
     ? "Auto-select projects"
     : selectedProjects.length === 0
-    ? "Select projects..."
-    : `${selectedProjects.length} project${
-        selectedProjects.length > 1 ? "s" : ""
+      ? "Select projects..."
+      : `${selectedProjects.length} project${selectedProjects.length > 1 ? "s" : ""
       } selected`;
 
   return (
@@ -83,21 +82,6 @@ export function ProjectSelector({
             <CommandInput placeholder="Search projects..." />
             <CommandList>
               <CommandEmpty>No projects found.</CommandEmpty>
-            </CommandList>
-            <CommandList>
-              <CommandGroup>
-                <CommandItem
-                  onSelect={handleSelectAuto}
-                  className="flex items-center"
-                >
-                  <div className="flex items-center gap-2 flex-1">
-                    <span>Auto-select relevant projects</span>
-                  </div>
-                  {selectedProjects.includes("auto") && (
-                    <Check className="h-4 w-4 ml-2" />
-                  )}
-                </CommandItem>
-              </CommandGroup>
             </CommandList>
             <CommandList>
               <CommandGroup heading="Available Projects">

@@ -1,5 +1,13 @@
 # TPE-TADL
 
+> Es necesario tener un entorno Python `.venv` en la raíz del proyecto, con las dependencias de `backend/requirements.txt` instaladas.
+>
+> Comando (Linux):
+> 
+> ```bash
+> python3 -m venv .venv && source .venv/bin/activate && pip install -r backend/requirements.txt
+> ```
+
 Proyecto que genera briefings automáticos para reuniones, utilizando como fuentes conversaciones, documentos y métricas. 
 
 ---

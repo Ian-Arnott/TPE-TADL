@@ -30,7 +30,7 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
     setPageNumber(1);
     setPdfBlob(null);
 
-    if (report?.status === "complete" && report.downloadUrl) {
+    if (report?.status === "complete" && report.error) {
       const loadPdf = async () => {
         try {
           if (pdfBlob && pdfFile) return;
@@ -47,7 +47,7 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
       console.log("Loading PDF for report:", report.id);
       loadPdf();
     }
-  }, [report?.id, report?.status, report?.downloadUrl]);
+  }, [report?.id, report?.status, report?.error]);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
@@ -65,7 +65,7 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">{report.title}</h2>
-        {report.status === "complete" && report.downloadUrl && (
+        {report.status === "complete" && report.error && (
           <Button onClick={() => onDownload(report.id)} className="gap-2">
             <Download className="h-4 w-4" />
             Download Report
@@ -73,10 +73,10 @@ export function ReportDetail({ report, onDownload }: ReportDetailProps) {
         )}
       </div>
 
-      {report.status === "failed" && report.error && (
+      {report.status === "failed" && report.downloadUrl && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{report.error}</AlertDescription>
+          <AlertDescription>{report.downloadUrl}</AlertDescription>
         </Alert>
       )}
 

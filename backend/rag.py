@@ -59,6 +59,8 @@ def get_index():
 
 # ─── SQLite (for report tracking) ───────────────────────────────────────────────
 
+# Add a lock for thread-safe database operations
+db_lock = threading.RLock()
 
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cur = conn.cursor()
@@ -109,11 +111,14 @@ def index_file(filepath: str, project: str, force: bool = False):
 
         # Check if file has been indexed and hasn't changed
         if not force:
-            cur.execute(
-                "SELECT last_modified FROM indexed_files WHERE file_path = ?",
-                (filepath,),
-            )
-            result = cur.fetchone()
+            with db_lock:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT last_modified FROM indexed_files WHERE file_path = ?",
+                    (filepath,),
+                )
+                result = cursor.fetchone()
+                cursor.close()
             if result and result[0] == int(file_mtime):
                 return  # Skip indexing if file hasn't changed
 
@@ -166,11 +171,14 @@ def index_file(filepath: str, project: str, force: bool = False):
         index.upsert(vectors=vectors, namespace="main")
 
         file_mtime = int(file_mtime)
-        cur.execute(
-            "INSERT OR REPLACE INTO indexed_files (file_path, project, last_modified, last_indexed) VALUES (?, ?, ?, ?)",
-            (filepath, project, file_mtime, file_mtime),
-        )
-        conn.commit()
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO indexed_files (file_path, project, last_modified, last_indexed) VALUES (?, ?, ?, ?)",
+                (filepath, project, file_mtime, file_mtime),
+            )
+            conn.commit()
+            cursor.close()
     except Exception as e:
         print(f"Error indexing file {filepath}: {e}")
 
@@ -244,22 +252,29 @@ def run_ragas_eval(
         )
         print(ragas_result.scores)
         print(ragas_result.scores[0]["llm_context_precision_without_reference"])
-        cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE reports
-            SET context_precision=?, context_recall=?, answer_relevancy=?, faithfulness=?
-            WHERE id=?
-            """,
-            (
-                str(ragas_result.scores[0]["llm_context_precision_without_reference"]),
-                "",
-                str(ragas_result.scores[0]["answer_relevancy"]),
-                str(ragas_result.scores[0]["faithfulness"]),
-                report_id,
-            ),
-        )
-        conn.commit()
+
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE reports
+                SET context_precision=?, context_recall=?, answer_relevancy=?, faithfulness=?
+                WHERE id=?
+                """,
+                (
+                    str(
+                        ragas_result.scores[0][
+                            "llm_context_precision_without_reference"
+                        ]
+                    ),
+                    "",
+                    str(ragas_result.scores[0]["answer_relevancy"]),
+                    str(ragas_result.scores[0]["faithfulness"]),
+                    report_id,
+                ),
+            )
+            conn.commit()
+            cursor.close()
     except Exception as e:
         print(f"Error running RAGAS evaluation: {e}")
 
@@ -268,9 +283,12 @@ def run_ragas_eval(
 
 
 def generate_briefing(report_id: str, projects: list[str]):
-    cur = conn.cursor()
-    cur.execute("SELECT prompt, projects FROM reports WHERE id=?", (report_id,))
-    row = cur.fetchone()
+    with db_lock:
+        cursor = conn.cursor()
+        cursor.execute("SELECT prompt, projects FROM reports WHERE id=?", (report_id,))
+        row = cursor.fetchone()
+        cursor.close()
+
     if not row:
         return
     prompt, projects_json = row
@@ -358,26 +376,32 @@ def generate_briefing(report_id: str, projects: list[str]):
 
         title = result.split("Briefing: ")[1].split("\n")[0]
 
-        cur.execute(
-            """
-            UPDATE reports
-            SET status='complete', download_path=?, title=?
-            WHERE id=?
-        """,
-            (pdf_outfile, title, report_id),
-        )
-        conn.commit()
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE reports
+                SET status='complete', download_path=?, title=?
+                WHERE id=?
+            """,
+                (pdf_outfile, title, report_id),
+            )
+            conn.commit()
+            cursor.close()
 
     except Exception as e:
-        cur.execute(
-            """
-            UPDATE reports
-            SET status='failed', error=?
-            WHERE id=?
-        """,
-            (str(e), report_id),
-        )
-        conn.commit()
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE reports
+                SET status='failed', error=?
+                WHERE id=?
+            """,
+                (str(e), report_id),
+            )
+            conn.commit()
+            cursor.close()
         print(f"Error generating report {report_id}: {e}")
 
 
@@ -386,19 +410,21 @@ def generate_briefing(report_id: str, projects: list[str]):
 
 def create_report(title: str, prompt: str, projects: list[str]) -> dict:
     try:
-
         report_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO reports
-            (id, title, prompt, projects, createdAt, status)
-            VALUES (?, ?, ?, ?, ?, 'generating')
-        """,
-            (report_id, title, prompt, json.dumps(projects), now),
-        )
-        conn.commit()
+
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO reports
+                (id, title, prompt, projects, createdAt, status)
+                VALUES (?, ?, ?, ?, ?, 'generating')
+            """,
+                (report_id, title, prompt, json.dumps(projects), now),
+            )
+            conn.commit()
+            cursor.close()
 
         thread = threading.Thread(target=generate_briefing, args=(report_id, projects))
         thread.daemon = True
@@ -418,9 +444,12 @@ def create_report(title: str, prompt: str, projects: list[str]) -> dict:
 
 
 def list_reports() -> list[dict]:
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM reports")
-    rows = cur.fetchall()
+    with db_lock:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM reports")
+        rows = cursor.fetchall()
+        cursor.close()
+
     result = []
     for r in rows:
         result.append(
@@ -443,7 +472,9 @@ def list_reports() -> list[dict]:
 
 
 def get_report_path(report_id: str) -> Optional[str]:
-    cur = conn.cursor()
-    cur.execute("SELECT download_path FROM reports WHERE id=?", (report_id,))
-    row = cur.fetchone()
+    with db_lock:
+        cursor = conn.cursor()
+        cursor.execute("SELECT download_path FROM reports WHERE id=?", (report_id,))
+        row = cursor.fetchone()
+        cursor.close()
     return row[0] if row else None
